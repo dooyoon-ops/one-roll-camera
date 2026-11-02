@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>한 롤 카메라</title>
+<style>
+  :root { --bg:#0b1220; --card:#121b2e; --line:#1f2b44; --ink:#e6edf7; --dim:#8a9bb8; --teal:#2dd4bf; --amber:#ff9a3c; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  #app { max-width:520px; margin:0 auto; padding:14px 14px 90px; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  h1 { font-size:20px; margin:4px 0 2px; letter-spacing:-0.5px; }
+  .sub { color:var(--dim); font-size:13px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-top:12px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  input[type=text] { flex:1; min-width:0; background:#0e1628; border:1px solid var(--line); color:var(--ink); border-radius:10px; padding:9px 10px; font-size:15px; }
+  button { font:inherit; }
+  .chip { background:#0e1628; border:1px solid var(--line); color:var(--ink); border-radius:999px; padding:8px 12px; font-size:14px; }
+  .chip.on { border-color:var(--teal); color:var(--teal); }
+  .chip:disabled { opacity:.4; cursor:not-allowed; }
+  .chip.arm { border-color:var(--amber); color:var(--amber); }
+  .seg { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .seg .chip { padding:8px 4px; font-size:13px; }
+  .filters { display:grid; grid-template-columns:repeat(2,1fr); gap:8px; }
+  .filters .chip { border-radius:12px; text-align:left; padding:10px; }
+  .filters .chip small { display:block; color:var(--dim); font-size:12px; margin-top:2px; }
+  .shutterWrap { display:flex; flex-direction:column; align-items:center; gap:10px; padding:8px 0 4px; }
+  .shutter { width:86px; height:86px; border-radius:50%; border:4px solid var(--ink); background:radial-gradient(circle at 50% 45%, #2a3550, #0e1628); color:var(--ink); font-size:14px; }
+  .shutter:disabled { opacity:.35; }
+  .count { font-family:"Courier New",monospace; font-size:28px; color:var(--amber); letter-spacing:2px; text-shadow:0 0 6px rgba(255,154,60,.5); }
+  .link { background:none; border:none; color:var(--teal); text-decoration:underline; padding:4px; font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:10px; }
+  .cell { aspect-ratio:1; border-radius:8px; overflow:hidden; background:#070b14; border:1px solid var(--line); position:relative; padding:0; }
+  .cell img { width:100%; height:100%; object-fit:cover; display:block; }
+  .cell.wait { display:flex; align-items:center; justify-content:center; text-align:center; color:#6b5a48; font-size:11px; line-height:1.4; white-space:pre-line; background:repeating-linear-gradient(45deg,#120c08,#120c08 6px,#170f0a 6px,#170f0a 12px); }
+  .past { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--line); font-size:14px; }
+  .past:first-child { border-top:none; }
+  #viewer { position:fixed; inset:0; background:rgba(0,0,0,.92); display:none; flex-direction:column; align-items:center; justify-content:center; padding:16px; gap:12px; z-index:9; }
+  #viewer.on { display:flex; }
+  #viewer img { max-width:100%; max-height:75vh; border-radius:6px; }
+  .note { color:var(--dim); font-size:12px; line-height:1.5; margin-top:8px; }
+  .warn { color:var(--amber); font-size:13px; margin-top:8px; }
+  .hidden { display:none !important; }
+  /* 현상 연출 */
+  #flash { position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:20; }
+  #flash.go { animation:flash .45s ease-out; }
+  @keyframes flash { 0% { opacity:.95; } 100% { opacity:0; } }
+  .count.tick { animation:tick .35s ease-out; }
+  @keyframes tick { 0% { transform:scale(1.25); color:#fff; } 100% { transform:scale(1); } }
+  .cell.reveal img { animation:reveal 1.6s ease-out both; }
+  @keyframes reveal { 0% { opacity:0; filter:brightness(.15) sepia(1) blur(3px); } 60% { opacity:1; filter:brightness(.7) sepia(.6) blur(1px); } 100% { opacity:1; filter:none; } }
+  .banner { background:#1a1408; border:1px solid #5a3d14; color:var(--amber); border-radius:12px; padding:10px 12px; font-size:14px; margin-top:12px; }
+  .toggle { display:flex; align-items:center; gap:8px; color:var(--dim); font-size:13px; margin-top:10px; }
+  .toggle input { width:18px; height:18px; accent-color:var(--teal); }
+  @media (prefers-reduced-motion: reduce) { #flash.go, .count.tick, .cell.reveal img { animation:none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>한 롤 카메라</h1>
+    <span class="sub" id="rollMeta"></span>
+  </header>
+  <div class="sub">찍은 사진은 바로 못 봅니다. 롤이 현상될 때까지 기다리세요.</div>
+
+  <div class="card">
+    <div class="row"><input type="text" id="rollName" maxlength="24" placeholder="롤 이름 (예: 영흥도 11/14)"></div>
+    <div class="shutterWrap">
+      <div class="count" id="count">24</div>
+      <button class="shutter" id="shutter">찍기</button>
+      <button class="link" id="pickBtn">갤러리에서 고르기</button>
+      <input type="file" id="camIn" accept="image/*" capture="environment" class="hidden">
+      <input type="file" id="pickIn" accept="image/*" multiple class="hidden">
+    </div>
+    <div class="warn hidden" id="warn"></div>
+  </div>
+
+  <div class="card">
+    <div class="sub" style="margin-bottom:8px">필름</div>
+    <div class="filters" id="filters"></div>
+    <label class="toggle"><input type="checkbox" id="stampOn"> 주황 날짜 도장 찍기 (필름 400)</label>
+  </div>
+
+  <div class="card">
+    <div class="sub" style="margin-bottom:8px">현상</div>
+    <div class="seg" id="modes"></div>
+    <div class="note" id="modeNote"></div>
+  </div>
+
+  <div class="banner hidden" id="devBanner"></div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <b id="rollTitle"></b>
+      <button class="chip" id="newRoll">새 롤</button>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="note" id="gridNote"></div>
+  </div>
+
+  <div class="card" id="pastCard">
+    <div class="sub" style="margin-bottom:4px">지난 롤</div>
+    <div id="pastList"></div>
+  </div>
+
+  <div class="note">사진은 이 기기 안에만 남습니다(어디로도 보내지 않음). 크게 본 뒤 길게 눌러 저장하거나 내려받기를 누르세요.</div>
+</div>
+
+<div id="flash"></div>
+<div id="viewer">
+  <img id="vImg" alt="">
+  <div class="row">
+    <a class="chip" id="vDown" download="hanrol.jpg">내려받기</a>
+    <button class="chip" id="vClose">닫기</button>
+  </div>
+  <div class="note" id="vHint"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'hanrol.v1', ROLL = 24, LONG = 1080;
+  var FILTERS = [
+    { id: 'film', name: '필름 400', desc: '따뜻하고 바랜 · 날짜 도장' },
+    { id: 'phone', name: '2005 폰카', desc: '거친 화소 · 초록 끼' },
+    { id: 'insta', name: '즉석 사진', desc: '정사각 · 흰 여백' },
+    { id: 'bw', name: '흑백 400', desc: '굵은 입자 · 강한 대비' }
+  ];
+  var MODES = [
+    { id: 'now', name: '바로', note: '찍자마자 현상됩니다. (요즘 카메라와 같음)' },
+    { id: 'roll', name: '롤 다 찍으면', note: '24장을 다 찍거나 새 롤을 열면 이 롤이 한꺼번에 현상됩니다.' },
+    { id: 'morning', name: '다음 날 아침', note: '찍은 뒤 처음 오는 아침 7시에 현상됩니다.' }
+  ];
+
+  // ?now=2026-11-14T12:00 으로 시각 흉내(시험용)
+  var qNow = new URLSearchParams(location.search).get('now');
+  function now() { return qNow ? new Date(qNow).getTime() : Date.now(); }
+
+  function el(tag, props, kids) {
+    var e = document.createElement(tag);
+    if (props) for (var k in props) {
+      if (k === 'text') e.textContent = props[k];
+      else if (k === 'cls') e.className = props[k];
+      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), props[k]);
+      else e.setAttribute(k, props[k]);
+    }
+    (kids || []).forEach(function (c) { if (c) e.appendChild(c); });
+    return e;
+  }
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ── 저장 ──
+  // 목록(롤·장·시각)은 localStorage에 작게, 사진 자체는 IndexedDB에(큰 칸).
+  // IndexedDB가 없는 곳(일부 웹뷰)이면 예전처럼 사진도 localStorage에 넣고 안내.
+  function load() {
+    try { var s = JSON.parse(localStorage.getItem(KEY)); if (s && s.rolls && s.rolls.length) return s; } catch (e) { }
+    return { filter: 'film', stamp: true, seen: [], rolls: [newRollObj('morning')] };
+  }
+  function newRollObj(mode) { return { id: 'r' + now(), name: '', mode: mode, opened: now(), closed: null, shots: [] }; }
+  var st = load();
+  if (st.stamp === undefined) st.stamp = true;
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(st)); return true; }
+    catch (e) { showWarn('기기 저장칸이 찼습니다. 지난 롤에서 사진을 내려받고 롤을 지워 주세요.'); return false; }
+  }
+  var DB = null, cache = {}, inline = false;
+  var noIdb = new URLSearchParams(location.search).has('noidb'); // 시험용: IndexedDB 없는 곳 흉내
+  function idbOpen() {
+    return new Promise(function (res) {
+      if (noIdb || !window.indexedDB) return res(null);
+      try {
+        var rq = indexedDB.open('hanrol', 1);
+        rq.onupgradeneeded = function () { rq.result.createObjectStore('shots'); };
+        rq.onsuccess = function () { res(rq.result); };
+        rq.onerror = function () { res(null); };
+        rq.onblocked = function () { res(null); };
+      } catch (e) { res(null); }
+    });
+  }
+  function tx(mode) { return DB.transaction('shots', mode).objectStore('shots'); }
+  function idbPut(k, v) {
+    return new Promise(function (res, rej) {
+      var t = DB.transaction('shots', 'readwrite'); t.objectStore('shots').put(v, k);
+      t.oncomplete = function () { res(); }; t.onerror = function () { rej(t.error); }; t.onabort = function () { rej(t.error || new Error('저장 취소')); };
+    });
+  }
+  function idbLoadAll() {
+    return new Promise(function (res) {
+      var out = {}, rq = tx('readonly').openCursor();
+      rq.onsuccess = function () { var c = rq.result; if (c) { out[c.key] = c.value; c.continue(); } else res(out); };
+      rq.onerror = function () { res(out); };
+    });
+  }
+  function shotId(t) { return 's' + t + '-' + Math.random().toString(36).slice(2, 7); }
+  function dataOf(s) { return s.data || cache[s.id] || null; }
+  var ready = idbOpen().then(function (db) {
+    DB = db; inline = !db;
+    if (!db) { showWarn('이 화면에선 큰 저장칸(IndexedDB)을 못 써서 사진을 작은 칸에 넣습니다. 한 롤쯤 찍으면 찰 수 있어요.'); return; }
+    return idbLoadAll().then(function (all) {
+      cache = all;
+      // 예전 판(사진이 localStorage 안에 있던 것)을 옮김
+      var moves = [];
+      st.rolls.forEach(function (r) { r.shots.forEach(function (s) {
+        if (!s.id) s.id = shotId(s.t);
+        if (s.data) { var d = s.data; moves.push(idbPut(s.id, d).then(function () { cache[s.id] = d; delete s.data; })); }
+      }); });
+      return Promise.all(moves).then(function () { if (moves.length) save(); });
+    });
+  }).then(function () { render(); }, function (e) { showWarn('사진 칸을 여는 중 문제: ' + e.message); render(); });
+  function cur() { return st.rolls[st.rolls.length - 1]; }
+
+  // ── 현상 규칙 ──
+  function nextMorning(t) {
+    var d = new Date(t); var m = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 7, 0, 0, 0);
+    if (m.getTime() <= t) m.setDate(m.getDate() + 1);
+    return m.getTime();
+  }
+  function devAt(roll, shot) {
+    if (roll.mode === 'now') return shot.t;
+    if (roll.mode === 'roll') return roll.closed; // null이면 아직
+    return nextMorning(shot.t);
+  }
+  function developed(roll, shot) { var a = devAt(roll, shot); return a !== null && a <= now(); }
+  function fmtWhen(t) {
+    var d = new Date(t), n = new Date(now());
+    var same = d.toDateString() === n.toDateString();
+    var tm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    if (same) return '오늘 ' + tm;
+    var tmr = new Date(n.getFullYear(), n.getMonth(), n.getDate() + 1);
+    if (d.toDateString() === tmr.toDateString()) return '내일 ' + tm;
+    return (d.getMonth() + 1) + '/' + d.getDate() + ' ' + tm;
+  }
+
+  // ── 필터 ──
+  function stampText(t) {
+    var d = new Date(t);
+    return "'" + String(d.getFullYear()).slice(2) + ' ' + String(d.getMonth() + 1).padStart(2, ' ') + ' ' + String(d.getDate()).padStart(2, ' ');
+  }
+  function clamp(v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+  function develop(img, filter, t, stamp) {
+    var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    var sx = 0, sy = 0, sw = w, sh = h;
+    if (filter === 'insta') { var s = Math.min(w, h); sx = (w - s) / 2; sy = (h - s) / 2; sw = sh = s; }
+    var k = Math.min(1, LONG / Math.max(sw, sh));
+    var W = Math.max(1, Math.round(sw * k)), H = Math.max(1, Math.round(sh * k));
+    var c = document.createElement('canvas'), g = c.getContext('2d');
+    if (filter === 'phone') {
+      // 작게 줄였다 키워 거친 화소
+      var sm = document.createElement('canvas'); sm.width = Math.max(1, Math.round(W / 4)); sm.height = Math.max(1, Math.round(H / 4));
+      sm.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sm.width, sm.height);
+      c.width = W; c.height = H; g.imageSmoothingEnabled = false; g.drawImage(sm, 0, 0, W, H);
+    } else { c.width = W; c.height = H; g.drawImage(img, sx, sy, sw, sh, 0, 0, W, H); }
+    var id = g.getImageData(0, 0, W, H), p = id.data, cx = W / 2, cy = H / 2, md = Math.sqrt(cx * cx + cy * cy);
+    for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
+      var i = (y * W + x) * 4, r = p[i], gg = p[i + 1], b = p[i + 2];
+      var dx = x - cx, dy = y - cy, v = Math.sqrt(dx * dx + dy * dy) / md; // 0 가운데 ~ 1 모서리
+      if (filter === 'film') {
+        r = r * 0.9 + 22; gg = gg * 0.88 + 16; b = b * 0.8 + 18;           // 검정 띄우고 바램
+        r += 12; b -= 8;                                                     // 따뜻하게
+        var n = (Math.random() - 0.5) * 22; r += n; gg += n; b += n;          // 입자
+        var vg = 1 - 0.38 * v * v; r *= vg; gg *= vg; b *= vg;               // 테두리 어둡게
+      } else if (filter === 'phone') {
+        var l = 0.3 * r + 0.59 * gg + 0.11 * b;
+        r = l + (r - l) * 1.35 - 6; gg = l + (gg - l) * 1.35 + 10; b = l + (b - l) * 1.35 + 4; // 채도 위, 초록 끼
+        var n2 = (Math.random() - 0.5) * 14; r += n2; gg += n2; b += n2;
+      } else if (filter === 'insta') {
+        r = 128 + (r - 128) * 0.82 + 10; gg = 128 + (gg - 128) * 0.82 + 6; b = 128 + (b - 128) * 0.82;
+        var sh2 = (255 - (0.3 * r + 0.59 * gg + 0.11 * b)) / 255; gg += 10 * sh2; b += 18 * sh2; r -= 6 * sh2; // 그림자 청록
+      } else if (filter === 'bw') {
+        var L = 0.3 * r + 0.59 * gg + 0.11 * b; L = 128 + (L - 128) * 1.4;
+        L += (Math.random() - 0.5) * 36; L *= 1 - 0.3 * v * v; r = gg = b = L;
+      }
+      p[i] = clamp(r); p[i + 1] = clamp(gg); p[i + 2] = clamp(b);
+    }
+    g.putImageData(id, 0, 0);
+    var out = c;
+    if (filter === 'insta') { // 아래 흰 여백
+      var m = Math.round(W * 0.06), bottom = Math.round(W * 0.22);
+      out = document.createElement('canvas'); out.width = W + m * 2; out.height = H + m + bottom;
+      var og = out.getContext('2d'); og.fillStyle = '#f4f1ea'; og.fillRect(0, 0, out.width, out.height); og.drawImage(c, m, m);
+    }
+    if (filter === 'film' && stamp !== false) { // 주황 날짜 도장(끌 수 있음)
+      var fs = Math.round(Math.min(W, H) * 0.055);
+      g.font = 'bold ' + fs + 'px "Courier New", monospace'; g.textAlign = 'right'; g.textBaseline = 'bottom';
+      g.shadowColor = 'rgba(255,120,30,0.9)'; g.shadowBlur = fs * 0.4; g.fillStyle = '#ff9a3c';
+      g.fillText(stampText(t), W - fs * 0.9, H - fs * 0.7);
+    }
+    return out.toDataURL('image/jpeg', filter === 'phone' ? 0.55 : 0.8);
+  }
+
+  // ── 찍기 ──
+  // 사진 한 장을 롤에 넣음. 끝나면 true(넣었음) / false(실패) 로 풀리는 약속을 돌려줌.
+  function addOne(f, roll) {
+    return new Promise(function (done) {
+      var url = URL.createObjectURL(f), img = new Image();
+      img.onload = function () {
+        var t = now(), data;
+        try { data = develop(img, st.filter, t, st.stamp); } catch (err) { showWarn('사진을 바꾸지 못했습니다: ' + err.message); URL.revokeObjectURL(url); return done(false); }
+        URL.revokeObjectURL(url);
+        var s = { id: shotId(t), t: t, filter: st.filter };
+        var put = ready.then(function () { if (DB) return idbPut(s.id, data); s.data = data; });
+        put.then(function () {
+          if (DB) cache[s.id] = data;
+          roll.shots.push(s);
+          if (roll.shots.length >= ROLL && !roll.closed) roll.closed = t;
+          if (!save()) { roll.shots.pop(); if (roll.closed === t) roll.closed = null; }
+          var ok = roll.shots[roll.shots.length - 1] === s;
+          if (ok) snapFx();
+          render(true);
+          done(ok);
+        }, function (err) { showWarn('사진을 저장하지 못했습니다(기기 칸이 찼을 수 있음): ' + (err && err.message)); done(false); });
+      };
+      img.onerror = function () { showWarn('이 파일은 사진으로 읽지 못했습니다.'); URL.revokeObjectURL(url); done(false); };
+      img.src = url;
+    });
+  }
+  // 고른 순서대로 한 장씩. 남은 칸보다 많으면 남은 칸까지만.
+  var busy = false;
+  function onFile(e) {
+    var files = Array.prototype.slice.call(e.target.files || []); e.target.value = '';
+    if (!files.length || busy) return;
+    var roll = cur(), left = ROLL - roll.shots.length;
+    if (left <= 0) return;
+    var take = files.slice(0, left), cut = files.length > left;
+    busy = true;
+    var chain = Promise.resolve(true);
+    take.forEach(function (f) { chain = chain.then(function (ok) { return ok ? addOne(f, roll) : false; }); });
+    chain.then(function () {
+      busy = false;
+      if (cut) showWarn('남은 칸이 ' + left + '장이라 ' + left + '장만 넣었어요.');
+    });
+  }
+  // 찰칵: 화면 번쩍 · 남은 장 숫자 튐 · 짧은 떨림
+  function snapFx() {
+    var f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+    var c = $('count'); c.classList.remove('tick'); void c.offsetWidth; c.classList.add('tick');
+    try { if (navigator.vibrate) navigator.vibrate(30); } catch (e) { }
+  }
+  function showWarn(s) { var w = $('warn'); w.textContent = s; w.classList.remove('hidden'); }
+
+  // ── 그리기 ──
+  var flash = false;
+  function render(justShot) {
+    var roll = cur(), left = ROLL - roll.shots.length;
+    $('count').textContent = String(left).padStart(2, '0');
+    $('shutter').disabled = left <= 0;
+    $('shutter').textContent = left <= 0 ? '롤 끝' : '찍기';
+    $('pickBtn').disabled = left <= 0;
+    $('rollName').value = roll.name;
+    $('stampOn').checked = st.stamp !== false;
+    $('stampOn').disabled = st.filter !== 'film';
+    $('rollMeta').textContent = '롤 ' + st.rolls.length;
+    $('rollTitle').textContent = (roll.name || '이름 없는 롤') + ' · ' + roll.shots.length + '/' + ROLL;
+
+    var fl = $('filters'); fl.replaceChildren();
+    FILTERS.forEach(function (f) {
+      fl.appendChild(el('button', { cls: 'chip' + (st.filter === f.id ? ' on' : ''), 'data-filter': f.id, onclick: function () { st.filter = f.id; save(); render(); } },
+        [document.createTextNode(f.name), el('small', { text: f.desc })]));
+    });
+
+    var md = $('modes'); md.replaceChildren();
+    var locked = roll.shots.length > 0;
+    MODES.forEach(function (m) {
+      var b = el('button', { cls: 'chip' + (roll.mode === m.id ? ' on' : ''), 'data-mode': m.id, text: m.name, onclick: function () { if (locked) return; roll.mode = m.id; save(); render(); } });
+      if (locked) b.disabled = true;
+      md.appendChild(b);
+    });
+    var mm = MODES.filter(function (m) { return m.id === roll.mode; })[0];
+    var lockMsg = { now: '이 롤은 바로 현상돼요', roll: '이 롤은 다 찍거나 새 롤을 열 때 현상돼요', morning: '이 롤은 내일 아침 7시에 현상돼요' }[roll.mode];
+    $('modeNote').textContent = locked ? lockMsg + ' — 바로 보려면 새 롤을 시작하세요.' : mm.note;
+
+    // 새로 현상된 장 = 현상됐는데 아직 안 본 것(seen에 없음). 처음 이 판을 여는 사람은 이미 현상된 걸 본 것으로 침.
+    var fresh = {}, freshN = 0, freshVisible = 0;
+    if (!st.seen) { st.seen = []; st.rolls.forEach(function (r) { r.shots.forEach(function (s) { if (s.id && developed(r, s)) st.seen.push(s.id); }); }); save(); }
+    st.rolls.forEach(function (r) { r.shots.forEach(function (s) {
+      if (s.id && developed(r, s) && dataOf(s) && st.seen.indexOf(s.id) < 0) { fresh[s.id] = r.mode; freshN++; st.seen.push(s.id); if (r === roll) freshVisible++; }
+    }); });
+    if (freshN) save();
+    var gr = $('grid'); gr.replaceChildren();
+    var waiting = 0, k = 0;
+    roll.shots.forEach(function (s, i) {
+      var c = cell(roll, s, i);
+      if (fresh[s.id]) { c.classList.add('reveal'); var im = c.querySelector('img'); if (im) im.style.animationDelay = (k++ * 0.25) + 's'; }
+      gr.appendChild(c); if (!developed(roll, s)) waiting++;
+    });
+    var bigDev = 0; for (var fid in fresh) if (fresh[fid] !== 'now') bigDev++;
+    if (bigDev) {
+      var bn = $('devBanner');
+      bn.textContent = '현상됐어요 — ' + bigDev + '장이 떠올랐습니다.' + (bigDev > freshVisible ? ' (지난 롤 포함)' : '');
+      bn.classList.remove('hidden'); clearTimeout(bn._t); bn._t = setTimeout(function () { bn.classList.add('hidden'); }, 9000);
+    }
+    for (var i = roll.shots.length; i < Math.min(ROLL, roll.shots.length + 3); i++) gr.appendChild(el('div', { cls: 'cell', style: 'opacity:.25' }));
+    var gn = '';
+    if (!roll.shots.length) gn = '아직 한 장도 안 찍었습니다.';
+    else if (waiting && roll.mode === 'roll') gn = '현상 기다리는 ' + waiting + '장 — 롤을 다 찍거나 새 롤을 열면 현상됩니다.';
+    else if (waiting) gn = '현상 기다리는 ' + waiting + '장.';
+    else gn = '모두 현상됐습니다.';
+    if (justShot && roll.mode !== 'now') gn = '찰칵. ' + gn;
+    $('gridNote').textContent = gn;
+
+    var past = st.rolls.slice(0, -1).reverse(), pl = $('pastList'); pl.replaceChildren();
+    $('pastCard').classList.toggle('hidden', past.length === 0);
+    past.forEach(function (r) {
+      var dev = r.shots.filter(function (s) { return developed(r, s); }).length;
+      pl.appendChild(el('div', { cls: 'past' }, [
+        el('span', { text: (r.name || '이름 없는 롤') + ' · ' + r.shots.length + '장 (현상 ' + dev + ')' }),
+        el('button', { cls: 'link', text: '보기', onclick: function () { openPast(r); } })
+      ]));
+    });
+  }
+  function cell(roll, s, i) {
+    if (developed(roll, s)) {
+      var d = dataOf(s);
+      if (!d) return el('div', { cls: 'cell wait', 'data-shot': i, text: '불러오는 중' });
+      return el('button', { cls: 'cell', 'data-shot': i, onclick: function () { view(d, roll, i); } }, [el('img', { src: d, alt: (i + 1) + '번째' })]);
+    }
+    var a = devAt(roll, s);
+    return el('div', { cls: 'cell wait', 'data-shot': i, text: '현상 중\n' + (a === null ? '롤 끝나면' : fmtWhen(a)) });
+  }
+  function view(data, roll, i) {
+    $('vImg').src = data; $('vDown').href = data;
+    $('vDown').setAttribute('download', (roll.name || 'hanrol').replace(/[\\/:*?"<>|\s]+/g, '_') + '-' + String(i + 1).padStart(2, '0') + '.jpg');
+    $('vHint').textContent = '';
+    $('viewer').classList.add('on');
+  }
+  function openPast(r) {
+    var shots = r.shots.map(function (s, i) { return { s: s, i: i }; }).filter(function (o) { return developed(r, o.s) && dataOf(o.s); });
+    if (!shots.length) { showWarn('이 롤은 아직 현상된 사진이 없습니다.'); return; }
+    var k = 0;
+    view(dataOf(shots[0].s), r, shots[0].i);
+    var hint = function () { $('vHint').textContent = shots.length > 1 ? (k + 1) + ' / ' + shots.length + ' · 사진을 누르면 다음 장' : ''; };
+    hint();
+    $('vImg').onclick = function () { k = (k + 1) % shots.length; view(dataOf(shots[k].s), r, shots[k].i); hint(); };
+  }
+
+  // ── 묶기 ──
+  $('shutter').addEventListener('click', function () { $('camIn').click(); });
+  $('pickBtn').addEventListener('click', function () { $('pickIn').click(); });
+  $('camIn').addEventListener('change', onFile);
+  $('pickIn').addEventListener('change', onFile);
+  $('rollName').addEventListener('change', function (e) { cur().name = e.target.value.trim(); save(); render(); });
+  // 새 롤: 한 번 누르면 묻고(3초), 한 번 더 눌러야 닫힘 — 실수로 롤이 닫히지 않게
+  var armT = null;
+  function disarm() { var b = $('newRoll'); clearTimeout(armT); armT = null; b.classList.remove('arm'); b.textContent = '새 롤'; }
+  $('newRoll').addEventListener('click', function () {
+    var roll = cur(), b = $('newRoll');
+    if (!roll.shots.length) { $('gridNote').textContent = '이 롤에 한 장이라도 찍어야 새 롤을 열 수 있어요.'; return; }
+    if (!armT) {
+      b.classList.add('arm');
+      b.textContent = roll.mode === 'roll' ? '한 번 더 → 이 롤 현상' : '한 번 더 → 롤 닫기';
+      armT = setTimeout(disarm, 3000); return;
+    }
+    disarm();
+    if (!roll.closed) roll.closed = now();
+    st.rolls.push(newRollObj(roll.mode)); save(); render();
+  });
+  $('stampOn').addEventListener('change', function (e) { st.stamp = e.target.checked; save(); });
+  // 화면을 켜 둔 채 아침 7시를 넘기면 그 자리에서 현상되게(30초마다 셈, 바뀔 때만 다시 그림)
+  function devCount() { var n = 0; st.rolls.forEach(function (r) { r.shots.forEach(function (s) { if (developed(r, s)) n++; }); }); return n; }
+  var lastDev = -1;
+  function tickCheck() { var n = devCount(); if (lastDev >= 0 && n !== lastDev) render(); lastDev = n; return n; }
+  setInterval(tickCheck, 30000);
+  function closeV() { $('viewer').classList.remove('on'); $('vImg').onclick = null; }
+  $('vClose').addEventListener('click', closeV);
+  $('viewer').addEventListener('click', function (e) { if (e.target === $('viewer')) closeV(); }); // 바깥 어두운 곳을 눌러도 닫힘
+  render();
+  window.__hanrol = { st: function () { return st; }, nextMorning: nextMorning, develop: develop, ready: ready,
+    tickCheck: tickCheck, store: function () { return DB ? 'idb' : 'local'; }, cached: function () { return Object.keys(cache).length; } };
+})();
+</script>
+</body>
+</html>
